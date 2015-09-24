@@ -1,0 +1,6 @@
+
+# ------------------------------------------------------
+
+for im in `seq 1 12`; do mm=`echo 00$im | tail -c3 `;  ncl 'var="UV850_'${mm}'"' 'ufile="/work/earnest/UPData/Bias_FF02/SelLev_NorESM/Bias_U850_'${mm}'.nc"' 'vfile="/work/earnest/UPData/Bias_FF02/SelLev_NorESM/Bias_V850_'${mm}'.nc"'  div_and_wind_3.ncl ; done
+
+# -----------------------

@@ -1,0 +1,112 @@
+#! /bin/bash
+###############################################################################
+# 
+#   
+#
+#------------------------------------------------------------------------------
+#
+set -e
+###############################################################################
+# Parameters
+#
+JobStartTime=`date`
+# 
+ensDir=${outputDir}/ensmean
+RMObs=/work/earnest/temp/HadISST_sst_flipped.nc
+
+#ensDir=${outputDir}/Run_Mean_3m
+#RMObs=/work/earnest/temp/HadISST_sst_flipped_RM3m.nc
+
+ObsRef=ACC_SST
+
+AnalysisN="ForEnsembles_RMSE_SST"
+echo "Start checking "${AnalysisN}" ... "
+###############################################################################
+#
+vname="sst"
+nclACCfunc=${funcPath}/ps_func_corr_coef2D.ncl
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+TotalLength=${RunLength}
+resStr="remapcon,r144x96 -"
+PredictionStartMonth=`echo ${PredCaseName} | awk -F "_pM" '{print $2}' | cut -c1-2`
+Analysismergedfn=${DestDir}/${AnalysisN}_merged
+export acct1fn=${tempdir}/temp_template_timmean.nc
+rm -f ${RMSEmergedfn} ${acct1fn} ${ACCoutfn} 
+tempPrefix=temp_mod
+templs=${tempPrefix}_ls
+if [ ! -d ${DestDir}/Obs_remapcon} ]; then
+  mkdir -p ${DestDir}/Obs_remapcon
+fi
+###############################################################################
+# Calculating ACC
+# for each ensemble members
+for mem in `seq 1 1 `; do
+  mem=`echo 0000${mem} | tail -c3 `
+  mkdir -p ${DestDir}/mem${mem}
+  ACCfnMerged=${DestDir}/${AnalysisN}_mem${mem}_merged
+  rm -f ${ACCfnMerged}
+  firstyear=`echo ${DPYear} | awk -F " " '{print $1}'  `
+  cd ${archiveDIR}/${firstyear}
+  ensembleCase=`ls --color=no -d *mem${mem} `
+# check predicted month ----------------------
+  cd ${archiveDIR}/${firstyear}/${ensembleCase}/atm/hist
+  monthsuffix=`ls --color=no *h0* | awk -F "-" '{print $2}' ` 
+  run_length=${TotalLength}
+
+  for im in ${monthsuffix}; do
+    rm -f ${tempdir}/${tempPrefix}* 
+    # check runOrder ----------------------------
+    (( runOrder = TotalLength - run_length ))
+    (( run_length = run_length - 1 ))
+    (( nline = runOrder + 1 ))
+    runOrder=`echo 000${runOrder} | tail -c4`
+
+    for PredYear in ${DPYear}; do
+      year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+      mkdir -p ${DestDir}/mem${mem}/${year}
+      ModDfn=${DestDir}/mem${mem}/${year}/Mod_M${mem}_${AnalysisN}_r${runOrder}_${im}
+      Biasfn=${DestDir}/mem${mem}/${year}/Mod_Bias_M${mem}_${AnalysisN}_r${runOrder}_${im}
+      RMSEfn=${DestDir}/mem${mem}/${year}/${AnalysisN}_M${mem}_r${runOrder}_${im}
+      Obsfn=${DestDir}/Obs_remapcon/${year}/Obs_r${runOrder}_${im}
+      if [ ! -d ${DestDir}/Obs_remapcon/${year} ]; then
+        mkdir -p ${DestDir}/Obs_remapcon/${year}
+      fi
+      # check predicted month ----------------------
+      if [ ! -f ${Biasfn} ]; then
+        cd ${archiveDIR}/${PredYear}/${ensembleCase}/atm/hist
+        ls --color=no *h0* | sort >  ${templs} 
+        file=`cat ${templs} | sed -n "${nline}p"  ` 
+        fyr=`echo ${file} | awk -F "." '{print $(NF-1)}' | cut -c1-4 `
+        fmm=`echo ${file} | awk -F "." '{print $(NF-1)}' | tail -c3 ` 
+
+        ${cdo} chname,SST,${vname} -selvar,SST ${file} ${tempdir}/${tempPrefix}_mod_${file} 
+        if [ ! -f ${Obsfn} ]; then
+          ${cdo} setvrange,0,50 -${resStr}seldate,${fyr}-${fmm}-01,${fyr}-${fmm}-31 ${Obs} ${Obsfn}
+        fi
+        ${cdo} chname,SST,${vname} -setvrange,0,50 -subc,273.15 -selvar,SST ${file} ${ModDfn}
+        ${cdo} sub ${ModDfn} ${Obsfn} ${Biasfn}
+        ${cdo} -sqr ${Biasfn} ${RMSEfn} 
+        sleep 0.1s
+        rm -f ${templs}
+      fi # for calculating anomaly 
+    done # for each prediction starting year
+
+done # for each prediction months
+
+${cdo} mergetime ${DestDir}/mem${mem}/${year}/${AnalysisN}_M${mem}_r*.nc ${ACCfnMerged}
+${cdo} sqrt -fldmean ${ACCfnMerged} ${ACCfnMerged}_fldmean
+${cdo} sqrt -fldmean -sellonlatbox,0,360,-60,60 ${ACCfnMerged} ${ACCfnMerged}_fldmean_60
+${cdo} sqrt -fldmean -sellonlatbox,0,360,-45,45 ${ACCfnMerged} ${ACCfnMerged}_fldmean_45
+${cdo} fldmax -sqrt ${ACCfnMerged} ${ACCfnMerged}_fldmax
+${cdo} fldmax -sqrt -sellonlatbox,0,360,-60,60 ${ACCfnMerged} ${ACCfnMerged}_fldmax_60
+${cdo} fldmax -sqrt -sellonlatbox,0,360,-45,45 ${ACCfnMerged} ${ACCfnMerged}_fldmax_45
+sleep 0.1s
+done # for ensembles
+###########################################################################
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+

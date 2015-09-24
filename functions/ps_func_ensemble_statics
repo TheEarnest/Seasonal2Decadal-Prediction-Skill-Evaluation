@@ -1,0 +1,47 @@
+#! /bin/bash
+###############################################################################
+# ensemble info
+#------------------------------------------------------------------------------
+#
+set -e
+
+exit 
+ensStat="ensmean_"${component}
+echo "Checking ensemble statistic outputs ... "
+counter=0
+for PredYear in ${DPYear}; do 
+  year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+  PredicDir=${archiveDIR}/${PredYear}
+  DestDir=${outputDir}/${ensStat}/${year}
+  if [ ! -d ${DestDir} ]; then
+    mkdir -p ${DestDir}
+  else
+    rm -f ${DestDir}/*.tmp
+  fi
+  fistensemble=`echo ${ensembleCases} | awk -F " " '{print $1}'`
+  ensName=`echo ${fistensemble} | awk -F "_mem" '{print $1}'`
+  cd ${PredicDir}/${fistensemble}/${component}/hist
+  files_suffix=`ls --color=no *-??.nc | awk -F "${fistensemble}" '{print $2}'` 
+
+  for suffix in ${files_suffix}; do
+    cd ${PredicDir}
+    ensTarget=${DestDir}/${ensName}.${ensStat}${suffix}
+    if [ ! -f ${ensTarget} ]; then
+      ensStr=" "
+      for ensemble in ${ensembleCases}; do
+        targetFile=${ensemble}/${component}/hist/${ensemble}${suffix}
+        if [ -f ${targetFile} ]; then
+          ensStr=${ensStr}" "${targetFile}
+        fi
+      done
+      ncea -O -3 ${ensStr}  -o ${ensTarget}
+#  nccopy -k 1 temp_nc ${DestDir}/${ensName}.ensmean${suffix} 
+    fi
+  done
+  (( counter = counter + 1 ))
+#  if (( counter == 2 )); then
+#    exit 1
+#  fi
+
+done
+

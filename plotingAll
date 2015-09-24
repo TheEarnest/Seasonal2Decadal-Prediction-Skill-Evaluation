@@ -1,0 +1,25 @@
+#! /bin/bash
+###############################################################################
+# check prediction skill
+#------------------------------------------------------------------------------
+#
+set -e
+ScriptHome=`pwd`
+DPCasePrefix=FF02_iOA0_pn75d_pL6_pM01
+workdir=/work/earnest/Analysis
+mScript=Plotnc2D_Global_CA
+
+vname="sst"; tarDIR=ACC_SST_Persistence_RM3m
+#vname="corr"; tarDIR=ACC_SST_RM3m
+
+dir=${workdir}/${DPCasePrefix}/${tarDIR}
+cd ${dir}
+mkdir -p ${dir}/figures
+files=`ls --color=no ${tarDIR}_r* `
+cd ${ScriptHome}
+for file in ${files}; do 
+  echo ${file}
+  matlab -nosplash -nodesktop -r "vname='${vname}'; filename='${dir}/${file}'; ${mScript}; exit"
+  figure=`ls --color=no *${file}*`
+  mv ${figure} ${dir}/figures
+done

@@ -1,0 +1,172 @@
+#! /bin/bash
+###############################################################################
+#  Pattern correlation between model and observation
+#  For each ensemble members 
+#
+#------------------------------------------------------------------------------
+#
+set -e
+###############################################################################
+# Parameters
+#
+JobStartTime=`date`
+# 
+# Run_Mean_3m
+ensDir=${outputDir}/ensmean
+RMObs=/work/earnest/temp/HadISST_sst_flipped.nc
+ObsRef=ACC_SST_Regional
+
+AnalysisN="ForEnsembles_ACC_SST_Regional"
+echo "Start checking "${AnalysisN}" ... "
+###############################################################################
+# Region define 
+#RegionN="Nino4"; RegLonLat="160,210,-5,5"
+RegionN="Nino3"; RegLonLat="-150,-90,-5,5"
+#RegionN="AtlNino3"; RegLonLat="-15,-0,-3,3"
+#RegionN="SPG"; RegLonLat="300,345,48,65"
+###############################################################################
+#
+vname="sst"
+nclACCfunc=${funcPath}/ps_func_corr_coef2D.ncl
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+TotalLength=${RunLength}
+resStr="remapcon,r144x96 -"
+PredictionStartMonth=`echo ${PredCaseName} | awk -F "_pM" '{print $2}' | cut -c1-2`
+Analysismergedfn=${DestDir}/${AnalysisN}_${RegionN}_merged
+export acct1fn=${tempdir}/temp_template_timmean.nc
+rm -f ${RMSEmergedfn} ${acct1fn} ${ACCoutfn} 
+tempPrefix=temp_accR
+templs=${tempPrefix}_ls
+###############################################################################
+# Calculating ACC
+# for each ensemble members
+if [ ! -d ${DestDir}/Obs_Data ]; then
+  mkdir -p ${DestDir}/Obs_Data
+fi
+
+
+for mem in `seq 1 1 `; do
+  mem=`echo 0000${mem} | tail -c3 `
+  mkdir -p ${DestDir}/mem${mem}
+  ACCfnMerged=${DestDir}/${AnalysisN}_mem${mem}_${RegionN}_merged
+  rm -f ${ACCfnMerged}
+  firstyear=`echo ${DPYear} | awk -F " " '{print $1}'  `
+  cd ${archiveDIR}/${firstyear}
+  ensembleCase=`ls --color=no -d *mem${mem} `
+# check predicted month ----------------------
+  cd ${archiveDIR}/${firstyear}/${ensembleCase}/atm/hist
+  monthsuffix=`ls --color=no *h0* | awk -F "-" '{print $2}' ` 
+  run_length=${TotalLength}
+
+  for im in ${monthsuffix}; do
+    rm -f ${tempdir}/${tempPrefix}* 
+    # check runOrder ----------------------------
+    (( runOrder = TotalLength - run_length ))
+    (( run_length = run_length - 1 ))
+    (( nline = runOrder + 1 ))
+    runOrder=`echo 000${runOrder} | tail -c4`
+ 
+    Anomalyfn=${DestDir}/mem${mem}/Mod_Anomaly_M${mem}_${AnalysisN}_${RegionN}_r${runOrder}_${im}
+    Climatologyfn=${DestDir}/mem${mem}/Mod_Clim_M${mem}_${AnalysisN}_${RegionN}_r${runOrder}_${im}
+    Obsfn=${DestDir}/Obs_Data/Obs_Anomaly_${AnalysisN}_${RegionN}_r${runOrder}_${im}
+    ObsClimatologyfn=${DestDir}/Obs_Data/Obs_Clim_${AnalysisN}_${RegionN}_r${runOrder}_${im}
+     rm -f ${tempdir}/${tempPrefix}_*
+#    Obsfn=`ls --color=no ${DestDir}/Obs_Data/Obs_Anomaly_*_r${runOrder}_${im} `
+#    ObsClimatologyfn=`ls --color=no ${DestDir}/Obs_Data/Obs_Clim_*_r${runOrder}_${im} `
+
+    if [ ! -f ${Anomalyfn} ]; then
+      DataStr=" "
+      for PredYear in ${DPYear}; do
+        # check predicted month ----------------------
+        cd ${archiveDIR}/${PredYear}/${ensembleCase}/atm/hist
+        ls --color=no *h0* | sort >  ${templs} 
+        file=`cat ${templs} | sed -n "${nline}p"  ` 
+        ${cdo} chname,SST,${vname} -fldmean -sellonlatbox,${RegLonLat} -selvar,SST ${file} ${tempdir}/${tempPrefix}_Anomaly_${file} 
+        tempdate=`echo ${file} | awk -F "h0." '{print $2}' | awk -F ".nc" '{print $1}'`
+        if [ ! -f ${Obsfn} ]; then
+          ${cdo} fldmean -sellonlatbox,${RegLonLat} -${resStr}seldate,${tempdate}-01,${tempdate}-31 ${RMObs} ${tempdir}/${tempPrefix}_Obs_${tempdate}
+        fi
+        sleep 0.1
+        rm -f ${templs}
+      done # for each prediction starting year
+      cd ${tempdir}
+      ${cdo} mergetime ${tempdir}/${tempPrefix}_Anomaly_* ${tempdir}/${tempPrefix}_M_merged
+      ${cdo} timmean ${tempdir}/${tempPrefix}_M_merged ${Climatologyfn}
+      ${cdo} sub ${tempdir}/${tempPrefix}_M_merged ${Climatologyfn} ${Anomalyfn}
+      ${cdo} detrend ${Anomalyfn} ${Anomalyfn}_detrend.nc
+
+      if [ ! -f ${Obsfn} ]; then
+        ${cdo} mergetime ${tempdir}/${tempPrefix}_Obs_* ${tempdir}/${tempPrefix}_O_merged
+        ${cdo} timmean ${tempdir}/${tempPrefix}_O_merged ${ObsClimatologyfn}
+        ${cdo} sub ${tempdir}/${tempPrefix}_O_merged ${ObsClimatologyfn} ${Obsfn}
+        ${cdo} detrend ${Obsfn} ${Obsfn}_detrend.nc
+      fi
+
+  fi  # for calculating anomaly 
+
+  if [ ! -f ${acct1fn} ]; then
+    cp -f ${Climatologyfn} ${acct1fn}
+  fi
+
+  export Anomaly_Prefn=${Anomalyfn}_detrend.nc
+#  cd ${outputDir}/${ObsRef}
+#  Obsfn=`ls --color=no Obs*${RegionN}_r${runOrder}_${im}_detrend.nc`
+#  Obsfn=${outputDir}/${ObsRef}/${Obsfn}
+  export Anomaly_Perfn=${Obsfn}
+  export ACCfn=${DestDir}/mem${mem}/${AnalysisN}_M${mem}_${RegionN}_r${runOrder}_${im}
+  export ACCoutfn=${tempdir}/temp_corr_${im}
+
+  if [ ! -f ${ACCfn} ]; then
+    lastyear=`echo ${DPYear} | awk -F " " '{print $NF}' | awk -F "_pY" '{print $2}' `
+    lastyearDIR=`echo ${DPYear} | awk -F " " '{print $NF}' `
+    cd ${ensDir}/${lastyear} || cd ${archiveDIR}/${lastyearDIR}/${ensembleCase}/atm/hist
+
+    ls --color=no *h0* | sort >  ${templs}
+    file=`cat ${templs} | sed -n "${nline}p"  `
+    tempdate=`echo ${file} | awk -F "h0." '{print $2}' | awk -F ".nc" '{print $1}'`
+    sleep 0.1
+    rm ${templs} 
+    month=`echo ${im} | cut -c1-2`
+    ncl ${nclACCfunc}
+    ${cdo} chname,${vname},corr ${ACCoutfn} ${tempPrefix}_corr1
+    ${cdo} setdate,${tempdate}-01 ${tempPrefix}_corr1 ${tempPrefix}_corr2
+    cp -f ${tempPrefix}_corr2 ${ACCfn}
+    # -----------------------------------------------
+    # Strong SPG, 85-94
+    ${cdo} seldate,1985-01-01,1994-12-31 ${Anomalyfn} ${Anomalyfn}_SSPG
+    ${cdo} seldate,1985-01-01,1994-12-31 ${Obsfn} ${Obsfn}_SSPG
+    export Anomaly_Prefn=${Anomalyfn}_SSPG
+    export Anomaly_Perfn=${Obsfn}_SSPG
+
+    ncl ${nclACCfunc}
+    ${cdo} chname,${vname},corr ${ACCoutfn} ${tempPrefix}_corr1
+    ${cdo} setdate,${tempdate}-01 ${tempPrefix}_corr1 ${tempPrefix}_corr2
+    cp -f ${tempPrefix}_corr2 ${ACCfn}_SSPG
+    # -----------------------------------------------
+    # Weak SPG, 95-04
+    ${cdo} seldate,1995-01-01,2004-12-31 ${Anomalyfn} ${Anomalyfn}_WSPG
+    ${cdo} seldate,1995-01-01,2004-12-31 ${Obsfn} ${Obsfn}_WSPG
+    export Anomaly_Prefn=${Anomalyfn}_WSPG
+    export Anomaly_Perfn=${Obsfn}_WSPG
+
+    ncl ${nclACCfunc}
+    ${cdo} chname,${vname},corr ${ACCoutfn} ${tempPrefix}_corr1
+    ${cdo} setdate,${tempdate}-01 ${tempPrefix}_corr1 ${tempPrefix}_corr2
+    cp -f ${tempPrefix}_corr2 ${ACCfn}_WSPG
+  fi
+
+done # for each prediction months
+
+${cdo} mergetime ${DestDir}/mem${mem}/${AnalysisN}_M${mem}_${RegionN}_r*.nc ${ACCfnMerged}
+${cdo} mergetime ${DestDir}/mem${mem}/Mod_Clim_M${mem}_${AnalysisN}_${RegionN}_r* ${tempdir}/${tempPrefix}_mod_clim_merged
+${cdo} subc,273.15 ${tempdir}/${tempPrefix}_mod_clim_merged  ${DestDir}/mem${mem}/Mod_Clim_M${mem}_${AnalysisN}_${RegionN}_Merged
+
+done # for ensembles
+###########################################################################
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+

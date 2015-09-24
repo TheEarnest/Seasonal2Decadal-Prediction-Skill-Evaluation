@@ -1,0 +1,136 @@
+#! /bin/bash
+###############################################################################
+# Anomaly correlation of Observation(s) & Observation(s), i.e. persistence skill
+#------------------------------------------------------------------------------
+#
+set -ex
+###############################################################################
+# Parameters
+#
+# Observationi (Obs) is defined in ps_func_Bias_SST
+var=sst
+Obs_org=/work/earnest/temp/HadISST_sst_flipped.nc
+ScriptHome=`pwd`
+TA_length=3 # time average period, eg. 3 for seasonal 
+AnalysisN="ACC_SST_Persistence"
+nclACCfunc=${ScriptHome}/corr_coef2D.ncl
+resStr="remapcon,r144x96 -"
+#resStr=""
+PredictStartMonth=01
+run_length=24
+tempdir=/work/earnest/temp
+DestDir=/work/earnest/Analysis/${AnalysisN}
+python=`which python `
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+ACCmergedfn=${DestDir}/${AnalysisN}_merged
+rm -f ${ACCmergedfn}
+export acct1fn=${tempdir}/temp_template_timmean.nc
+rm -f ${acct1fn}
+Obs=${Obs_org}_runM_${TA_length}
+if [ ! -f ${Obs}  ]; then
+  cdo runmean,${TA_length} ${Obs_org} ${Obs}
+fi
+
+###############################################################################
+# Calculating ACC for each "TA_length"
+#
+
+runOrder=0
+while [ ${runOrder} -le ${run_length} ]; do
+  runOrder=`echo 000${runOrder} | tail -c4`
+  yr=1998; mm=${PredictStartMonth}; dd=01
+  Ndate=`${python} dp_func_datecheck.py  ${yr} ${mm} ${dd} months ${runOrder} `
+  imonth=`echo ${Ndate} | cut -c6-7`
+
+ 
+  export Anomaly_Perfn=${DestDir}/Present_${AnalysisN}_r${runOrder}_${im}
+  ACCfn=${DestDir}/${AnalysisN}_r${runOrder}_${im}
+  export ACCoutfn=${tempdir}/temp_corr_${im}
+
+  ###########################################################################
+  # Calculating present anomaly  
+  # --
+  # find prediction years 
+  fyear=`echo ${dates} | awk -F " " '{print $1}' | awk -F "-" '{print $1}'`
+  eyear=`echo ${dates} | awk -F " " '{print $NF}' | awk -F "-" '{print $1}'`
+  tempPrefix=temp_obs_persis
+  tempmergedfn=${tempPrefix}_merged
+  cd ${tempdir}
+  rm -f ${tempPrefix}* 
+  ensStr=" "
+  for iyear in `seq ${fyear} ${eyear}`; do 
+    echo $imonth" "$imonth_e
+    checkmonth=`echo ${dates} | grep "${iyear}-${imonth}" | tail -c3` || checkmonth=""
+    tempfn=${tempPrefix}_${iyear}_${imonth}
+    if [ "${checkmonth}" != "" ]; then
+      (( iyear_e = iyear + modifyYEAR_e ))
+      cdo ${resStr}timmean -seldate,${iyear}-${imonth_f}-01,${iyear_e}-${imonth_e}-31 ${Obs} ${tempfn} 
+#      cdo cat ${tempfn} ${tempmergedfn}
+      ensStr=${ensStr}" "${tempfn}
+    fi
+  done
+  cdo mergetime ${tempPrefix}* ${tempmergedfn}
+  cdo ensmean ${ensStr} ${tempPrefix}_climatology
+  cdo sub ${tempmergedfn} ${tempPrefix}_climatology ${Anomaly_Perfn} 
+
+  if [ ! -f ${acct1fn} ]; then
+    cdo -O timmean ${Anomaly_Perfn} ${acct1fn}
+  fi
+
+  ###########################################################################
+  # Calculating prediction anomaly by using persistent forecast (${PredictionBaseNumber} months before predicting)
+  # --
+  (( ipmonth_f = PredictionStartMonth - TA_length ))
+  (( ipmonth_e = PredictionStartMonth - 1 ))
+  modifyYEAR_f=0; modifyYEAR_e=0;
+  if [ ${ipmonth_f} -le "0" ]; then
+    modifyYEAR_f=1
+    (( ipmonth_f = ipmonth_f + 12 ))
+  fi    
+  if [ ${ipmonth_e} -le "0" ]; then
+    modifyYEAR_e=1
+    (( ipmonth_e = ipmonth_e + 12 ))
+  fi
+  export Anomaly_Prefn=${DestDir}/Prediction_${AnalysisN}_r${runOrder}_${ipmonth_f}.nc
+
+  cd ${tempdir}
+  rm -f ${tempPrefix}*
+  ensStr=" "
+  for iyear in `seq ${fyear} ${eyear}`; do
+    checkmonth=`echo ${dates} | grep "${iyear}-${imonth}" | tail -c3` || checkmonth=""
+    if [ "${checkmonth}" != "" ]; then
+      (( ipyear_f = iyear - modifyYEAR_f ))
+      (( ipyear_e = iyear - modifyYEAR_e ))
+      tempfn=${tempPrefix}_${ipyear_f}_${ipmonth_f}
+      cdo ${resStr}timmean -seldate,${ipyear_f}-${ipmonth_f}-01,${ipyear_e}-${ipmonth_e}-31 ${Obs} ${tempfn}
+      ensStr=${ensStr}" "${tempfn} 
+    fi
+  done
+  cdo mergetime ${tempPrefix}* ${tempmergedfn}
+  cdo ensmean ${ensStr} ${tempPrefix}_climatology
+  cdo sub ${tempmergedfn} ${tempPrefix}_climatology ${Anomaly_Prefn}
+
+
+  ###########################################################################
+  # Calculating anomaly correlation
+  # --
+  if [ ! -f ${ACCfn} ]  && [ ${run_length} -ge "0" ]; then
+    month=`echo ${im} | cut -c1-2`
+    ncl ${nclACCfunc}
+    cdo -O chname,${var},corr ${ACCoutfn} temp_corr
+    cp -f temp_corr ${ACCfn}
+  fi
+  if [ ${run_length} -ge "0" ]; then
+    cdo cat ${ACCfn} ${ACCmergedfn}
+  fi
+done
+
+
+
+
+
+
+
+

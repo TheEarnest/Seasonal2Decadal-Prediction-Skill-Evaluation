@@ -1,0 +1,88 @@
+#! /bin/bash
+###############################################################################
+#  Check depth average of micom
+#------------------------------------------------------------------------------
+#
+set -e
+###############################################################################
+# Parameters
+#
+JobStartTime=`date`
+#
+# 
+ensDir=${outputDir}/ensmean_${component}
+AVE=`echo 000${average2} | tail -c5 `
+AnalysisN="OCN_DA_L"${AVE}
+
+echo "Start checking "${AnalysisN}" ... "
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+tempPrefix=temp_DA
+depth_bnds_text=${tempdir}/${tempPrefix}_depth_bnds_text
+
+
+# midLevels=`cdo showlevel -selvar,temperature ${tempFN} `
+
+firstyear=`echo ${DPYear}| awk -F " " '{print $1}' | awk -F "_pY" '{print $2}'`
+# check predicted month ----------------------
+cd ${ensDir}/${firstyear}
+files=`ls --color=no *`
+file=`echo ${files} | awk -F " " '{print $1}'`
+ncdump -v depth_bnds ${file} > ${depth_bnds_text}
+dblineS=`cat -n ${depth_bnds_text} | grep "depth_bnds =" | awk -F " " '{print $1}'`
+
+cd ${ensDir}
+DIRs=`ls -d --color=no * `
+for DIR in ${DIRs} ; do
+  cd ${ensDir}/${DIR}
+  if [ ! -d ${DestDir}/${DIR} ]; then
+    mkdir -p ${DestDir}/${DIR}
+  fi
+
+  files=`ls --color=no * `
+
+  for file in ${files} ; do
+    Analysisfn=${DestDir}/${DIR}/${AnalysisN}_${file}
+    if [ ! -f ${Analysisfn} ]; then
+      rm -f ${tempdir}/${tempPrefix}_levR*
+      layeridx=0;  UpperBound=0
+      echo "-----------------------------------------------------------------"
+      echo "   Working on "${Analysisfn}" ... "
+      echo "-----------------------------------------------------------------"  
+
+      while (( ${UpperBound} <= ${average2} )) ; do 
+        cd ${ensDir}/${DIR}
+        (( layeridx = layeridx + 1 ))
+        (( dpline = dblineS + layeridx ))
+        UpperBound=`cat ${depth_bnds_text} | sed -n "${dpline}p" | awk -F "," '{print $1}' | bc -l`
+        BottomBound=`cat ${depth_bnds_text} | sed -n "${dpline}p" | awk -F "," '{print $2}' | bc -l`
+        layerdepth=`echo "(${BottomBound}-${UpperBound})*1.0" | bc -l `
+        uBound=`echo "scale=0;(${UpperBound}/1.0)" | bc -l`
+        bBound=`echo "scale=0;(${BottomBound}/1.0)" | bc -l`
+        if (( ${bBound} > ${average2} )); then
+          layerdepth=`echo "${average2}-${UpperBound}" | bc -l `
+        else
+          layerdepth=`echo "(${BottomBound}-${UpperBound})*1.0" | bc -l `
+        fi
+        Ratio=`echo "${layerdepth}/${average2}" | bc -l `
+        ${cdo} mulc,${Ratio} -sellevidx,${layeridx} -selvar,templvl,salnlvl  ${file} ${tempdir}/${tempPrefix}_levR_${layeridx}
+        echo  ${layerdepth}", "${bottombound}
+        UpperBound=${bBound}
+      done 
+      cd ${tempdir}
+      # create sea mask
+      ${cdo} div ${tempPrefix}_levR_${layeridx} ${tempPrefix}_levR_${layeridx} ${tempPrefix}_levR_0
+      ${cdo} enssum ${tempPrefix}_levR_* ${tempPrefix}_levR_ensmean
+      ${cdo} mul ${tempPrefix}_levR_ensmean ${tempPrefix}_levR_0 ${Analysisfn}
+    fi
+  done  # for each lead month
+done # for each prediction year
+
+###########################################################################
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+
+

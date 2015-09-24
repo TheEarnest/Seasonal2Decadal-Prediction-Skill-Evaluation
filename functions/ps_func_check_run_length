@@ -1,0 +1,24 @@
+#! /bin/bash
+###############################################################################
+# Bias over nudging and prediction period
+#------------------------------------------------------------------------------
+#
+set -e
+#echo ${outputDir}
+
+fistensemble=`echo ${ensembleCases} | awk -F " " '{print $1}'`
+ensName=`echo ${fistensemble} | awk -F "_mem" '{print $1}'`
+
+firstPredyear=`echo ${DPYear} | awk -F " " '{print $1}' `
+firstPredicDir=${archiveDIR}/${firstPredyear}
+
+cd ${firstPredicDir}/${fistensemble}/${component}/hist
+files_suffix=`ls --color=no *h0* | awk -F "${fistensemble}" '{print $2}'` 
+
+RunLength=0
+for file in ${files_suffix}; do 
+  (( RunLength = RunLength + 1 ))
+done
+export RunLength=${RunLength}
+
+echo ${LinnBreaker}

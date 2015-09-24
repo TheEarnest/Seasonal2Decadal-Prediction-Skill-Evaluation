@@ -1,0 +1,135 @@
+#! /bin/bash
+###############################################################################
+# Root mean square error (RMSE) of Observation(s) & Observation(s), i.e. persistence skill
+#------------------------------------------------------------------------------
+#
+set -ex
+###############################################################################
+# Parameters
+#
+
+# Observationi (Obs) is defined in ps_func_Bias_SST
+var=sst
+ensDir=${outputDir}/ensmean
+cd ${ensDir}
+dates=`ls --color=no *-??.nc | awk -F "." '{print $(NF-1)}' `
+TA_length=${PredictionBaseNumber} # time average period, eg. 3 for seasonal 
+AnalysisN="RMSE_SST_Persistence"
+resStr="remapcon,r144x96 -"
+#resStr=""
+StartMonth=`echo ${PredCaseName} | awk -F "_pM" '{print $2}' | cut -c1-2`
+NudgingLength=`echo ${PredCaseName} | awk -F "_pn" '{print $2}' | awk -F "_pL" '{print $1}' `
+run_length=`echo ${PredCaseName} | awk -F "_pL" '{print $2}'`
+ (( PredictionStartMonth = StartMonth + NudgingLength ))
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+Analysismergedfn=${DestDir}/${AnalysisN}_merged
+rm -f ${RMSEmergedfn}
+tempPrefix=temp_obs_persis
+###############################################################################
+# Calculating ACC for each "TA_length"
+#
+for date in ${dates}; do
+  (( runOrder = TotalLength - run_length ))
+  (( run_length = run_length - TA_length ))
+  runOrder=`echo 000${runOrder} | tail -c4`
+  imonth=`echo ${date} | tail -c3`
+  imonth_f=${imonth}
+  #(( imonth_e = imonth + TA_length - 1 ))
+  imonth_e=`echo "(${imonth}+${TA_length}-1)/1" | bc`
+  modifyYEAR_e=0;
+  if [ ${imonth_e} -ge "13" ]; then
+    modifyYEAR_e=1
+    (( imonth_e = imonth_e - 12 ))
+  fi
+ 
+  im=${imonth}".nc"
+  Presentfn=${DestDir}/PresentAnomaly_${AnalysisN}_r${runOrder}_${im}
+#  Anomaly_Prefn=${DestDir}/Presistence_${AnalysisN}_r${runOrder}_${im}
+  Analysisfn=${DestDir}/${AnalysisN}_r${runOrder}_${im}
+
+  if [ ${run_length} -ge "0" ]; then
+    ###########################################################################
+    # Extract data   
+    # --
+    # find prediction years 
+    fyear=`echo ${dates} | awk -F " " '{print $1}' | awk -F "-" '{print $1}'`
+    eyear=`echo ${dates} | awk -F " " '{print $NF}' | awk -F "-" '{print $1}'`
+    tempmergedfn=${tempPrefix}_merged
+    cd ${tempdir}
+    rm -f ${tempPrefix}* 
+    for iyear in `seq ${fyear} ${eyear}`; do 
+      checkmonth=`echo ${dates} | grep "${iyear}-${imonth}" | tail -c3` || checkmonth=""
+      tempfn=${tempPrefix}_${iyear}_${imonth}
+      if [ "${checkmonth}" != "" ]; then
+        (( iyear_e = iyear + modifyYEAR_e ))
+        cdo -O ${resStr}timmean -seldate,${iyear}-${imonth_f}-01,${iyear_e}-${imonth_e}-31 ${Obs} ${tempfn} 
+      fi
+    done
+    cdo -O mergetime ${tempPrefix}* ${tempPrefix}_merged
+    cdo -O timmean ${tempPrefix}_merged ${tempPrefix}_climatology
+    cdo -O sub ${tempPrefix}_merged ${tempPrefix}_climatology ${Presentfn}
+
+    ###########################################################################
+    # Calculating prediction anomaly by using persistent forecast (${PredictionBaseNumber} months before predicting)
+    # --
+    (( ipmonth_f = PredictionStartMonth - TA_length ))
+    (( ipmonth_e = PredictionStartMonth - 1 ))
+    modifyYEAR_f=0; modifyYEAR_e=0;
+    if [ ${ipmonth_f} -le "0" ]; then
+      modifyYEAR_f=1
+      (( ipmonth_f = ipmonth_f + 12 ))
+    fi    
+    if [ ${ipmonth_e} -le "0" ]; then
+      modifyYEAR_e=1
+      (( ipmonth_e = ipmonth_e + 12 ))
+    fi
+    Predictionfn=${DestDir}/PredictionAnomaly_${AnalysisN}_r${runOrder}_${ipmonth_f}.nc
+    Predictionfn1=${DestDir}/PredictionAnomaly_${AnalysisN}_r00_${ipmonth_f}.nc
+    cd ${tempdir}
+    rm -f ${tempPrefix}*
+    if [ -f ${Predictionfn1} ]; then
+      cp -f ${Predictionfn1} ${Predictionfn}
+    else
+      for iyear in `seq ${fyear} ${eyear}`; do
+        checkmonth=`echo ${dates} | grep "${iyear}-${imonth}" | tail -c3` || checkmonth=""
+        if [ "${checkmonth}" != "" ]; then
+          (( ipyear_f = iyear - modifyYEAR_f ))
+          (( ipyear_e = iyear - modifyYEAR_e ))
+          tempfn=${tempPrefix}_${ipyear_f}_${ipmonth_f}
+          cdo -O ${resStr}timmean -seldate,${ipyear_f}-${ipmonth_f}-01,${ipyear_e}-${ipmonth_e}-31 ${Obs} ${tempfn}
+        fi
+      done
+      cdo -O mergetime ${tempPrefix}* ${tempPrefix}_merged
+      cdo -O timmean ${tempPrefix}_merged ${tempPrefix}_climatology
+      cdo -O sub ${tempPrefix}_merged ${tempPrefix}_climatology ${Predictionfn}
+    fi
+  fi
+  ###########################################################################
+  # Calculating RMSE
+  # --
+  if [ ! -f ${Analysisfn} ]  && [ ${run_length} -ge "0" ]; then
+    month=`echo ${im} | cut -c1-2`
+    rm -f ${tempPrefix}*
+    cdo -O sub ${Predictionfn} ${Presentfn} ${tempPrefix}_sub
+    month_p=`cdo showmon ${Presentfn} | awk -F " " '{print $1}'`
+    cdo -O setmon,${month_p} ${tempPrefix}_sub ${tempPrefix}_setmon_sub
+    cdo -O sqrt -timmean -sqr ${tempPrefix}_setmon_sub ${tempPrefix}_sqrt
+    #cdo -O timmean ${tempPrefix}_sqr ${tempPrefix}_timmean_sqr
+    #cdo -O sqrt ${tempPrefix}_timmean_sqr ${tempPrefix}_sqrt
+    cdo -O chname,sst,rmse ${tempPrefix}_sqrt ${Analysisfn}
+  fi
+  if [ ${run_length} -ge "0" ]; then
+    cdo cat ${Analysisfn} ${Analysismergedfn}
+  fi
+done
+
+
+
+
+
+
+
+

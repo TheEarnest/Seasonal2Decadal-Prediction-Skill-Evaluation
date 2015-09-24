@@ -1,0 +1,66 @@
+#! /bin/bash
+###############################################################################
+# Bias over nudging and prediction period
+#------------------------------------------------------------------------------
+#
+set -e
+echo ${outputDir}
+level=`echo 00${Lev} | tail -c3 `
+fistensemble=`echo ${ensembleCases} | awk -F " " '{print $1}'`
+ensName=`echo ${fistensemble} | awk -F "_mem" '{print $1}'`
+cd ${PredicDir}/${fistensemble}/${component}/hist
+files_suffix=`ls --color=no * | awk -F "${fistensemble}" '{print $2}'`
+oneSource=${outputDir}/ensmean/${ensName}.ensmean`echo ${files_suffix} | awk -F " " '{print $1}' `
+tempLevel=`cdo showlevel -sellevidx,${level} ${oneSource} ` 
+tempLevel=`echo ${tempLevel} | awk -F " " '{print $NF}' `
+pLevel=`echo "scale=0;${tempLevel}/1 " | bc -l`
+
+AnalysisN="Bias_"${var}_${pLevel}hPa
+DestDir=${outputDir}/${AnalysisN}
+ReanalysisDir=/work/shared/nn9039k/CAM_Nudging/met_data/ERAL26
+RPrefix=ERAint_nuCAM
+RSuffix=MLS081214.nc
+mkdir -p ${DestDir}
+
+cd ${tempdir}
+for suffix in ${files_suffix}; do
+  date=`echo ${suffix} | awk -F "." '{print $(NF-1)}'`
+  year=`echo ${date} | awk -F "-" '{print $1}'`
+  month=`echo ${date} | awk -F "-" '{print $NF}'`
+  if [ "${month}" != "00000" ]; then 
+    Source=${outputDir}/ensmean/${ensName}.ensmean${suffix}
+    Target=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}${suffix}
+    Reanalysis=${ReanalysisDir}/${year}/${RPrefix}_${year}${month}_${RSuffix}
+    if [ -f ${Source} ] && [ ! -f ${Target} ] ; then
+      cdo -O timmean -selvar,${var} -sellevidx,${Lev} ${Reanalysis} temp_obs 
+      cdo -O selvar,${var} -sellevidx,${Lev} ${Source} temp_mod
+      cdo -O sub temp_mod temp_obs ${Target}
+    fi
+  fi
+done
+
+cd ${DestDir}
+month_suffix=`ls --color=no * | awk -F "-" '{print $NF}' `
+run_length=${TotalLength}
+
+for im in ${month_suffix}; do  
+  (( runOrder = TotalLength - run_length ))
+  runOrder=`echo 00$runOrder | tail -c3`
+  enstarget=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}_ensemble_r${runOrder}_${im}
+  enstarget_Max=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}_ensmax_r${runOrder}_${im}
+  enstarget_Min=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}_ensmin_r${runOrder}_${im}
+  if [ ! -f ${enstarget} ]  && [ ${run_length} -gt "0" ]; then
+    files=`ls --color=no *${im} `
+    cdo ensmean ${files} ${enstarget}
+    cdo ensmax  ${files} ${enstarget_Max}
+    cdo ensmax  ${files} ${enstarget_Min}
+  fi
+  (( run_length = run_length - 1 ))
+done
+
+
+
+
+
+
+

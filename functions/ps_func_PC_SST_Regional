@@ -1,0 +1,112 @@
+#! /bin/bash
+###############################################################################
+#  Pattern correlation between model and observation
+#------------------------------------------------------------------------------
+#
+set -ex
+###############################################################################
+# Parameters
+#
+JobStartTime=`date`
+# 
+ensDir=${outputDir}/Run_Mean_3m
+RMObs=/work/earnest/temp/HadISST_sst_flipped_RM3m.nc
+Obsprefix=`echo ${Obs} | awk -F ".nc" '{print $1}'`
+Obssuffix=`echo ${RMObs} | awk -F "${Obsprefix}" '{print $2}' | awk -F ".nc" '{print $1}'`
+AnalysisN="ACC_SST"${Obssuffix}
+echo "Start checking "${AnalysisN}" ... "
+vname="sst"
+nclACCfunc=${funcPath}/ps_func_corr_coef2D.ncl
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+TotalLength=${RunLength}
+resStr="remapcon,r144x96 -"
+PredictionStartMonth=`echo ${PredCaseName} | awk -F "_pM" '{print $2}' | cut -c1-2`
+Analysismergedfn=${DestDir}/${AnalysisN}_merged
+ACCfnMerged=${DestDir}/${AnalysisN}_merged
+export acct1fn=${tempdir}/temp_template_timmean.nc
+rm -f ${RMSEmergedfn} ${acct1fn} ${ACCoutfn} ${ACCfnMerged}
+tempPrefix=temp_mod
+templs=${tempPrefix}_ls
+###############################################################################
+# Calculating ACC
+#
+
+firstyear=`echo ${DPYear} | awk -F " " '{print $1}' | awk -F "_pY" '{print $2}' `
+# check predicted month ----------------------
+cd ${ensDir}/${firstyear}
+monthsuffix=`ls --color=no *h0* | awk -F "-" '{print $2}' ` 
+run_length=${TotalLength}
+for im in ${monthsuffix}; do
+  rm -f ${tempdir}/${tempPrefix}* 
+  # check runOrder ----------------------------
+  (( runOrder = TotalLength - run_length ))
+  (( run_length = run_length - 1 ))
+  (( nline = runOrder + 1 ))
+  runOrder=`echo 000${runOrder} | tail -c4`
+ 
+  Anomalyfn=${DestDir}/Mod_Anomaly_${AnalysisN}_r${runOrder}_${im}
+  Climatologyfn=${DestDir}/Mod_Clim_${AnalysisN}_r${runOrder}_${im}
+  Obsfn=${DestDir}/Obs_Anomaly_${AnalysisN}_r${runOrder}_${im}
+  ObsClimatologyfn=${DestDir}/Obs_Clim_${AnalysisN}_r${runOrder}_${im}
+  if [ ! -f ${Anomalyfn} ]; then
+    DataStr=" "
+    for PredYear in ${DPYear}; do
+      year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+  
+      # check predicted month ----------------------
+      cd ${ensDir}/${year}
+      #echo ${fistensemble}
+      ls --color=no *h0* | sort >  ${templs} 
+      file=`cat ${templs} | sed -n "${nline}p"  ` 
+      cdo -O chname,SST,${vname} -selvar,SST ${file} ${tempdir}/${tempPrefix}_Anomaly_${file} 
+      tempdate=`echo ${file} | awk -F "h0." '{print $2}' | awk -F ".nc" '{print $1}'`
+      cdo ${resStr}seldate,${tempdate}-01,${tempdate}-31 ${RMObs} ${tempdir}/${tempPrefix}_Obs_${tempdate} 
+      sleep 0.1
+      rm -f ${templs}
+    done # for each prediction starting year
+    cd ${tempdir}
+    cdo -O mergetime ${tempdir}/${tempPrefix}_Anomaly_* ${tempdir}/${tempPrefix}_M_merged
+    cdo -O timmean ${tempdir}/${tempPrefix}_M_merged ${Climatologyfn}
+    cdo -O sub ${tempdir}/${tempPrefix}_M_merged ${Climatologyfn} ${Anomalyfn}
+
+    cdo -O mergetime ${tempdir}/${tempPrefix}_Obs_* ${tempdir}/${tempPrefix}_O_merged
+    cdo -O timmean ${tempdir}/${tempPrefix}_O_merged ${ObsClimatologyfn}
+    cdo -O sub ${tempdir}/${tempPrefix}_O_merged ${ObsClimatologyfn} ${Obsfn}
+
+  fi  # for calculating anomaly 
+
+  if [ ! -f ${acct1fn} ]; then
+    cp -f ${Climatologyfn} ${acct1fn}
+  fi
+
+  export Anomaly_Prefn=${Anomalyfn}
+  export Anomaly_Perfn=${Obsfn}
+  export ACCfn=${DestDir}/${AnalysisN}_r${runOrder}_${im}
+  export ACCoutfn=${tempdir}/temp_corr_${im}
+
+  if [ ! -f ${ACCfn} ]; then
+    lastyear=`echo ${DPYear} | awk -F " " '{print $NF}' | awk -F "_pY" '{print $2}' `
+    cd ${ensDir}/${lastyear} 
+    ls --color=no *h0* | sort >  ${templs}
+    file=`cat ${templs} | sed -n "${nline}p"  `
+    tempdate=`echo ${file} | awk -F "h0." '{print $2}' | awk -F ".nc" '{print $1}'`
+    sleep 0.1
+    rm ${templs} 
+    month=`echo ${im} | cut -c1-2`
+    ncl ${nclACCfunc}
+    cdo -O chname,${vname},corr ${ACCoutfn} ${tempPrefix}_corr1
+    cdo -O setdate,${tempdate}-01 ${tempPrefix}_corr1 ${tempPrefix}_corr2
+    cp -f ${tempPrefix}_corr2 ${ACCfn}
+  fi
+done # for each prediction months
+
+cdo mergetime ${DestDir}/${AnalysisN}_r* ${ACCfnMerged}
+
+###########################################################################
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+

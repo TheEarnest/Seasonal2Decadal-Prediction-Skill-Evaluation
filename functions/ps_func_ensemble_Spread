@@ -1,0 +1,64 @@
+#! /bin/bash
+###############################################################################
+# ensemble info
+#------------------------------------------------------------------------------
+#
+set -ex
+JobStartTime=`date`
+JobName="ps_func_ensemble_Spread"
+# 
+tempPrefix=temp_spread
+
+ensStat="ensspread_"${component}
+echo "Checking ensemble statistic outputs ... "
+counter=0
+for PredYear in ${DPYear}; do 
+  rm -f ${tempdir}/${tempPrefix}*
+  year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+  PredicDir=${archiveDIR}/${PredYear}
+  DestDir=${outputDir}/${ensStat}/${year}
+  if [ ! -d ${DestDir} ]; then
+    mkdir -p ${DestDir}
+  else
+    rm -f ${DestDir}/*.tmp
+  fi
+  fistensemble=`echo ${ensembleCases} | awk -F " " '{print $1}'`
+  ensName=`echo ${fistensemble} | awk -F "_mem" '{print $1}'`
+  cd ${PredicDir}/${fistensemble}/${component}/hist
+  files_suffix=`ls --color=no *-??.nc | awk -F "${fistensemble}" '{print $2}'` 
+
+  for suffix in ${files_suffix}; do
+    
+    cd ${PredicDir}
+    ensTarget=${DestDir}/${ensName}.${ensStat}${suffix}
+    if [ ! -f ${ensTarget} ]; then
+      ensStr=" "
+      for ensemble in ${ensembleCases}; do
+        sourceFile=${ensemble}/${component}/hist/${ensemble}${suffix}
+        targetFile=${tempdir}/${ensemble}${suffix}
+        if [ -f ${sourceFile} ]; then
+          rm -f ${tempdir}/${tempPrefix}_ncClassic
+          nccopy -k 1 ${sourceFile} ${tempdir}/${tempPrefix}_ncClassic
+          cdo -O selvar,SST ${tempdir}/${tempPrefix}_ncClassic ${targetFile}
+          ensStr=${ensStr}" "${targetFile}
+        fi
+      done
+      cdo -O ensmax ${ensStr} ${tempdir}/${tempPrefix}_ensmax
+      cdo -O ensmin ${ensStr} ${tempdir}/${tempPrefix}_ensmin
+      cdo -O sub ${tempdir}/${tempPrefix}_ensmax ${tempdir}/${tempPrefix}_ensmin  ${tempdir}/${tempPrefix}_ensspread
+      cdo -O setvrange,0,100 ${tempdir}/${tempPrefix}_ensspread ${ensTarget}
+#  nccopy -k 1 temp_nc ${DestDir}/${ensName}.ensmean${suffix} 
+    fi
+  done
+  (( counter = counter + 1 ))
+#  if (( counter == 2 )); then
+#    exit 1
+#  fi
+
+done
+
+###########################################################################
+echo ${JobStartTime}
+echo `date`" || "${JobName}
+echo ${LinnBreaker}
+

@@ -1,0 +1,61 @@
+#! /bin/bash
+###############################################################################
+#  
+#------------------------------------------------------------------------------
+#
+set -ex
+###############################################################################
+# Parameters
+#
+JobStartTime=`date`
+#
+# 
+AVE=`echo 000${average2} | tail -c5 `
+ensDir=${outputDir}/"OCN_DA_L"${AVE}
+AnalysisN="OCN_DA_L"${AVE}"_regrid"
+scriptname=${funcPath}/ps_func_ocn_regrid.py
+
+echo "Start checking "${AnalysisN}" ... "
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+tempPrefix=temp_DA_R
+
+cd ${ensDir}
+DIRs=`ls -d --color=no * `
+for DIR in ${DIRs} ; do
+  if [ ! -d ${DestDir}/${DIR} ]; then
+    mkdir -p ${DestDir}/${DIR}
+  fi
+  cd ${ensDir}/${DIR}
+  files=`ls --color=no * `
+
+  for file in ${files} ; do
+    cd ${ensDir}/${DIR}
+    Analysisfn=${DestDir}/${DIR}/R${file}
+    if [ ! -f ${Analysisfn} ]; then
+      vnames="templvl salnlvl"
+      for vname in ${vnames} ; do
+        Analysisfn_tmp=${DestDir}/${DIR}/R_${vname}_${file}
+        if [ ! -f ${Analysisfn_tmp} ]; then  
+          filename=${vname}_${file}
+          ${cdo} selvar,${vname}  ${file} ${tempdir}/${filename}_temp.nc
+          pythoncommandstr="${scriptname} ${tempdir}/${filename}_temp.nc ${vname} "
+          python ${pythoncommandstr}
+          nccopy -k 1 ${tempdir}/${filename} ${tempdir}/temp_nc
+          cp -f ${tempdir}/temp_nc ${Analysisfn_tmp}
+        fi
+      done
+      ${cdo} merge ${DestDir}/${DIR}/R_*_${file} ${Analysisfn}
+      rm -f ${DestDir}/${DIR}/R_*_${file}
+    fi
+  done  # for each lead month
+done # for each prediction year
+
+###########################################################################
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+
+

@@ -1,0 +1,65 @@
+#! /bin/bash
+###############################################################################
+# head ---
+set -e
+JobStartTime=`date`
+AnalysisN="ForEnsembles_Run_Mean_"${PredictionBase}
+ensDir=${outputDir}/ForEnsembles_RMSE_SST
+echo "Start checking "${AnalysisN}" ... "
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+tempPrefix=temp_RM
+templs=${tempPrefix}_ls
+###########################################################################
+#
+RM_length=`echo ${PredictionBase} | sed 's/.$//'`
+RM_base=`echo ${PredictionBase} | tail -c2`
+
+if [ "${RM_base}" == "m" ]; then
+  (( dRM = ( RM_length - 1 ) / 2 ))
+  (( RMStart = 1 + dRM ))
+  (( RMTotalLength = RunLength - dRM )) 
+
+  # for each ensemble members
+  for mem in `seq 2 2 `; do
+    mem=`echo 0000${mem} | tail -c3 `
+    mkdir -p ${DestDir}/mem${mem}
+
+    RMSEfn=${DestDir}/mem${mem}/${AnalysisN}_M${mem}_r${runOrder}_${im}
+   
+    for PredYear in ${DPYear}; do
+      year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+      mkdir -p ${DestDir}/mem${mem}/${year}
+      cd ${ensDir}/mem${mem}/${year}
+      ls --color=no Mod_Bias_* | sort >  ${templs}
+      for irm in `seq ${RMStart} ${RMTotalLength} `; do
+        (( sRM = irm - dRM ))
+        (( eRM = irm + dRM ))
+        RM_file=`cat ${templs} | sed -n "${irm}p"  `
+        if [ ! -f ${DestDir}/${year}/${RM_file} ]; then
+          RM_Str=' '
+          for jrm in `seq ${sRM} ${eRM}`; do
+            file=`cat ${templs} | sed -n "${jrm}p"  `
+            RM_Str=${RM_Str}" "${ensDir}/mem${mem}/${year}/${file}
+          done
+          RM_file=`cat ${templs} | sed -n "${irm}p"  `
+          ${cdo} ensmean ${RM_Str} ${DestDir}/mem${mem}/${year}/${RM_file}
+        fi
+      done
+      sleep 0.1 
+      rm -f ${templs}
+    done
+exit 1 
+  done
+elif [ "${RM_base}" == "y" ]; then
+  echo "not finished yet ....  "
+  exit 1
+fi
+###########################################################################
+# foot --- 
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+

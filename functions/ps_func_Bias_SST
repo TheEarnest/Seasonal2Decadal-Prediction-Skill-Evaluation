@@ -1,0 +1,77 @@
+#! /bin/bash
+###############################################################################
+# Bias over nudging and prediction period
+#------------------------------------------------------------------------------
+#
+set -ex
+#echo ${outputDir}
+JobStartTime=`date`
+AnalysisN="Bias_SST"
+echo "Start checking "${AnalysisN}" ... "
+DestDir=${outputDir}/${AnalysisN}
+fistensemble=`echo ${ensembleCases} | awk -F " " '{print $1}'`
+ensName=`echo ${fistensemble} | awk -F "_mem" '{print $1}'`
+for PredYear in ${DPYear}; do
+  year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+  PredicDir=${archiveDIR}/${PredYear}
+  DestDir=${outputDir}/${AnalysisN}/${year}
+  mkdir -p ${DestDir}
+
+  cd ${PredicDir}/${fistensemble}/${component}/hist
+  files_suffix=`ls --color=no * | awk -F "${fistensemble}" '{print $2}'`
+
+  cd ${tempdir}
+  for suffix in ${files_suffix}; do
+    date=`echo ${suffix} | awk -F "." '{print $(NF-1)}'`
+    #year=`echo ${date} | awk -F "-" '{print $1}'`
+    month=`echo ${date} | awk -F "-" '{print $NF}'`
+    mkdir -p ${outputDir}/${AnalysisN}/${year}
+ 
+    if [ "${month}" != "00000" ]; then 
+      Source=${outputDir}/ensmean/${year}/${ensName}.ensmean${suffix}
+      Target=${outputDir}/${AnalysisN}/${year}/${ensName}_${AnalysisN}${suffix}
+      if [ -f ${Source} ] && [ ! -f ${Target} ] ; then
+        ${cdo} setvrange,0,50 -remapcon,r144x96 -seldate,${year}-${month}-01,${year}-${month}-31 ${Obs} temp_obs 
+        ${cdo} setvrange,0,50 -subc,273.15 -selvar,SST ${Source} temp_mod
+        ${cdo} sub temp_mod temp_obs ${Target}
+      fi
+    fi
+  done
+done
+
+set -e
+tempfile='Z_tempcheck_ls'
+cd ${DestDir}
+month_suffix=`ls --color=no * | awk -F "-" '{print $NF}' `
+rlength=${RunLength}
+
+for im in ${month_suffix}; do  
+  (( runOrder = RunLength - rlength ))
+  (( nline = runOrder + 1 ))
+  runOrder=`echo 000$runOrder | tail -c4`
+  enstarget=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}_ensemble_r${runOrder}_${im}
+  enstarget_Max=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}_ensmax_r${runOrder}_${im}
+  enstarget_Min=${outputDir}/${AnalysisN}/${ensName}_${AnalysisN}_ensmin_r${runOrder}_${im}
+  if [ ! -f ${enstarget} ]  && [ ${rlength} -gt "0" ]; then
+    ensFiles=" "
+    for PredYear in ${DPYear}; do
+      year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+      PredicDir=${archiveDIR}/${PredYear}
+      DestDir=${outputDir}/${AnalysisN}/${year}
+      cd ${DestDir}
+      ls  --color=no * | sort  > ${tempfile} 
+      filestr=`cat ${tempfile} | sed -n "${nline}p"  `
+      ensFiles=${ensFiles}" "${DestDir}/${filestr}
+      sleep 0.1
+      rm ${tempfile}
+    done
+    cdo -O ensmean ${ensFiles} ${enstarget}
+    cdo -O ensmax  ${ensFiles} ${enstarget_Max}
+    cdo -O ensmax  ${ensFiles} ${enstarget_Min}
+  fi
+  (( rlength = rlength - 1 ))
+done
+
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}

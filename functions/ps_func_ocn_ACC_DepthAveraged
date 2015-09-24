@@ -1,0 +1,133 @@
+#! /bin/bash
+###############################################################################
+#  (ACC) models
+#------------------------------------------------------------------------------
+#
+set -e
+###############################################################################
+# Parameters
+#
+JobStartTime=`date`
+# 
+Obs=/work/earnest/temp/EN.4.0.2.f.analysis_remap.1981_2007.nc
+
+ensDir=${outputDir}/Run_Mean_3m_OCN_DA_L0500_regrid
+RMObs=/work/earnest/temp/EN.4.0.2.f.analysis_remap.1981_2007_RM3m.nc
+
+
+#ensDir=${outputDir}/OCN_DA_L0500_regrid
+#RMObs=/work/earnest/temp/EN.4.0.2.f.analysis_remap.1981_2007.nc
+
+if [ ! -f ${RMObs} ];then
+  RM_length=`echo ${PredictionBase} | sed 's/.$//'`
+  RM_base=`echo ${PredictionBase} | tail -c2`
+  if [ "${RM_base}" == "m" ]; then
+    ${cdo} runmean,${RM_length} ${Obs} ${RMObs}
+  fi
+fi
+Obsprefix=`echo ${Obs} | awk -F ".nc" '{print $1}'`
+Obssuffix=`echo ${RMObs} | awk -F "${Obsprefix}" '{print $2}' | awk -F ".nc" '{print $1}'`
+AnalysisN="OCN_ACC_"${vname}${Obssuffix}
+echo "Start checking "${AnalysisN}" ... "
+nclACCfunc=${funcPath}/ps_func_ocn_corr_coef2D.ncl
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+  mkdir -p ${DestDir}/Mod
+  mkdir -p ${DestDir}/Obs
+fi
+
+TotalLength=${RunLength}
+PredictionStartMonth=`echo ${PredCaseName} | awk -F "_pM" '{print $2}' | cut -c1-2`
+Analysismergedfn=${DestDir}/${AnalysisN}_merged
+ACCfnMerged=${DestDir}/${AnalysisN}_merged
+export acct1fn=${tempdir}/temp_template_timmean.nc
+rm -f ${RMSEmergedfn} ${acct1fn} ${ACCoutfn} ${ACCfnMerged}
+tempPrefix=temp_ocn
+templs=${tempPrefix}_ls
+###############################################################################
+# Calculating ACC
+#
+
+firstyear=`echo ${DPYear} | awk -F " " '{print $1}' | awk -F "_pY" '{print $2}' `
+# check predicted month ----------------------
+cd ${ensDir}/${firstyear}
+monthsuffix=`ls --color=no *-??.nc | awk -F "-" '{print $2}' ` 
+run_length=${TotalLength}
+for im in ${monthsuffix}; do
+  rm -f ${tempdir}/${tempPrefix}* 
+  # check runOrder ----------------------------
+  (( runOrder = TotalLength - run_length ))
+  (( run_length = run_length - 1 ))
+  (( nline = runOrder + 1 ))
+  runOrder=`echo 000${runOrder} | tail -c4`
+ 
+  Anomalyfn=${DestDir}/Mod/Mod_Anomaly_${AnalysisN}_r${runOrder}_${im}
+  Climatologyfn=${DestDir}/Mod/Mod_Clim_${AnalysisN}_r${runOrder}_${im}
+  Obsfn=${DestDir}/Obs/Obs_Anomaly_${AnalysisN}_r${runOrder}_${im}
+  ObsClimatologyfn=${DestDir}/Obs/Obs_Clim_${AnalysisN}_r${runOrder}_${im}
+  if [ ! -f ${Anomalyfn} ]; then
+    DataStr=" "
+    for PredYear in ${DPYear}; do
+      year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+  
+      # check predicted month ----------------------
+      cd ${ensDir}/${year}
+      #echo ${fistensemble}
+      ls --color=no *-??.nc | sort >  ${templs} 
+      file=`cat ${templs} | sed -n "${nline}p"  ` 
+      if [ "${vname}" == "temperature" ]; then
+        ${cdo} chname,templvl,${vname} -selvar,templvl ${file} ${tempdir}/${tempPrefix}_Anomaly_${file} 
+      elif [ "${vname}" == "salinity" ]; then
+        ${cdo} chname,salnlvl,${vname} -selvar,salnlvl ${file} ${tempdir}/${tempPrefix}_Anomaly_${file}
+      fi
+      tempdate=`echo ${file} | awk -F "hm." '{print $2}' | awk -F ".nc" '{print $1}'`
+      ${cdo} ${resStr}seldate,${tempdate}-01,${tempdate}-31 ${RMObs} ${tempdir}/${tempPrefix}_Obs_${tempdate} 
+      rm -f ${templs}
+    done # for each prediction starting year
+    cd ${tempdir}
+    ${cdo} mergetime ${tempdir}/${tempPrefix}_Anomaly_* ${tempdir}/${tempPrefix}_M_merged
+    ${cdo} timmean ${tempdir}/${tempPrefix}_M_merged ${Climatologyfn}
+    ${cdo} sub ${tempdir}/${tempPrefix}_M_merged ${Climatologyfn} ${Anomalyfn}
+    ${cdo} detrend ${Anomalyfn} ${Anomalyfn}_detrend.nc
+
+    ${cdo} mergetime ${tempdir}/${tempPrefix}_Obs_* ${tempdir}/${tempPrefix}_O_merged
+    ${cdo} timmean ${tempdir}/${tempPrefix}_O_merged ${ObsClimatologyfn}
+    ${cdo} sub ${tempdir}/${tempPrefix}_O_merged ${ObsClimatologyfn} ${Obsfn}
+    ${cdo} detrend ${Obsfn} ${Obsfn}_detrend.nc
+  fi  # for calculating anomaly 
+
+  if [ ! -f ${acct1fn} ]; then
+    cp -f ${Climatologyfn} ${acct1fn}
+  fi
+
+  export Anomaly_Prefn=${Anomalyfn}_detrend.nc
+  export Anomaly_Perfn=${Obsfn}_detrend.nc
+  export ACCfn=${DestDir}/Mod/${AnalysisN}_r${runOrder}_${im}
+  export ACCoutfn=${tempdir}/temp_corr_${im}
+
+  if [ ! -f ${ACCfn} ]; then
+    lastyear=`echo ${DPYear} | awk -F " " '{print $NF}' | awk -F "_pY" '{print $2}' `
+    cd ${ensDir}/${lastyear} 
+    ls --color=no *-??.nc | sort >  ${templs}
+    file=`cat ${templs} | sed -n "${nline}p"  `
+    tempdate=`echo ${file} | awk -F "hm." '{print $2}' | awk -F ".nc" '{print $1}'`
+    sleep 0.1
+    rm ${templs} 
+    month=`echo ${im} | cut -c1-2`
+    export varname=${vname}
+    ncl  ${nclACCfunc}
+    ${cdo} chname,${vname},corr ${ACCoutfn} ${tempPrefix}_corr1
+    ${cdo} setdate,${tempdate}-01 ${tempPrefix}_corr1 ${tempPrefix}_corr2
+    cp -f ${tempPrefix}_corr2 ${ACCfn}
+    # -----------------------------------------------
+  fi
+done # for each prediction months
+
+${cdo} mergetime ${DestDir}/Mod/${AnalysisN}_r*.nc ${ACCfnMerged}
+
+###########################################################################
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+

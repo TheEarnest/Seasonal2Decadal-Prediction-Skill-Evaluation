@@ -1,0 +1,143 @@
+#! /bin/bash
+###############################################################################
+# check prediction skill
+#------------------------------------------------------------------------------
+#
+set -e
+ScriptHome=`pwd`
+export funcPath=${ScriptHome}/functions
+#DPCasePrefix=FF02_iOA0_pn75d_pL6_pM01
+DPCasePrefix=FF06_06h_iOA0_pn364d_pL6_pM01
+#DPCasePrefix=FF03_06h_iOA0_pn16d_pL6_pM11
+#DPCasePrefix=FF05_06h_iOA3_pn75d_pL12_pM01
+#DPCasePrefix=FF04_30m_iOA0_pn44d_pL6_pM02
+#DPCasePrefix=nudgingT02_iOA0_pn364d_pL1_pM01
+workdir=/work/earnest/Analysis
+theHost=`echo ${HOST} | cut -c1-7`
+if [ "${theHost}" == "service" ]; then
+  archiveDIR=/work/earnest/archive/archive_FF03_06h
+  #archiveDIR=/work/earnest/archive
+  #archiveDIR=/work/earnest/archive/archive_FF03_06h
+  cdo="cdo -O "
+elif [ "${theHost}" == "hexagon" ]; then 
+  #archiveDIR=/work/earnest/Conversion
+  archiveDIR=/work/earnest/archive/archive_FF02
+  cdo="cdo -O -L "
+fi
+tempdir=/work/earnest/temp
+ncl_code_path=${HOME}/Analysis/ncl_codes
+PredictionBase=3m # (m: months; y: years)
+
+#######################################################################
+# process parameters
+#
+nudging_length=`echo ${DPCasePrefix} | awk -F "_pn" '{print $NF}' | awk -F "_" '{print $1}'`
+prediction_length=`echo ${DPCasePrefix} | awk -F "_pL" '{print $NF}' | awk -F "_" '{print $1}' `
+set -e
+
+cd ${archiveDIR}
+DPYear=`ls -d --color=no ${DPCasePrefix}* | sort`
+DP1stYear=`echo ${DPYear} | awk -F " " '{print $1}' `
+cd ${archiveDIR}/${DP1stYear}
+ensembleCases=`ls -d --color=no *mem*`
+PredCaseName=${DPCasePrefix}
+outputDir=${workdir}/${PredCaseName}
+component=atm    # start with monthly output 
+#component=ocn    # start with monthly output
+if [ "${component}" == "atm" ]; then
+  Obs=/work/earnest/temp/HadISST_sst_flipped.nc
+  if [ ! -f ${Obs} ]; then
+    lonflipScript=${ncl_code_path}/obs_lonflip.ncl
+    ncl ${lonflipScript}
+  fi
+fi
+LinnBreaker="--------------------------------------------------------"
+# ####################################################################
+# for run length
+# . ${funcPath}/ps_func_check_run_length
+echo "The length of this run is "${RunLength}
+
+# ####################################################################
+# for ensemble mean
+# ---------------------
+# . ${funcPath}/ps_func_ensemble_statics # update 16/04/15 by M. Shen
+ 
+if [ "${component}" == "ocn" ]; then
+  average2=500 # (m)
+# . ${funcPath}/ps_func_ocn_depth_averaged
+
+# . ${funcPath}/ps_func_ocn_regrid
+fi
+
+# ensDir=${outputDir}/OCN_DA_L0500_regrid
+# ensDir=${outputDir}/ensmean_atm
+# . ${funcPath}/ps_func_runmean  # update 19/04/15 by M. Shen
+
+# ####################################################################
+# for 2D bias pattern
+# ---------------------
+# . ${funcPath}/ps_func_Bias_SST # update 18/04/15 by M. Shen
+
+# . ${funcPath}/ps_func_4Ensembles_Bias_RMSE_SST
+
+# . ${funcPath}/ps_func_4Ensembles_runmean
+
+# . ${funcPath}/ps_func_RMSE_SST # 
+
+# . ${funcPath}/ps_func_ACC_SST  # update 20/04/15 by M. Shen
+
+# . ${funcPath}/ps_func_ACC_SST_Regional  # update 20/04/15 by M. Shen
+
+# . ${funcPath}/ps_func_ACC_SST_persistence
+
+# . ${funcPath}/ps_func_ACC_SST_persistence_Regional
+
+# . ${funcPath}/ps_func_ensemble_Spread
+
+# . ${funcPath}/ps_SNR_SST  # update 14/07/15 by M. Shen
+
+# . ${funcPath}/ps_func_4Ensembles_ACC_SST # update 24/04/05 by M. Shen
+
+ . ${funcPath}/ps_func_4Ensembles_ACC_SST_Regional # update 23/04/05 by M. Shen
+exit 1
+# . ${funcPath}/ps_func_4Ensemble23_ACC_SST_Regional # special code for 2 & 3
+
+if [ "${component}" == "ocn" ]; then
+  vnames="temperature salinity"
+  for vname in ${vnames}; do 
+    echo "For "${vname}" ... "
+#    . ${funcPath}/ps_func_ocn_ACC_DepthAveraged
+    
+    . ${funcPath}/ps_func_ocn_ACC_DepthAveraged_Regional
+  done
+# . ${funcPath}/ps_func_ACC_ocn_salinity
+
+# . ${funcPath}/ps_func_ocn_regrid
+fi
+
+exit
+# . ${funcPath}/ps_func_RMSE_SST_persistence
+
+# . ${funcPath}/ps_func_Bias_SSH
+
+# . ${funcPath}/ps_func_RMSE_SSH
+
+# . ${funcPath}/ps_func_ACC_SSH
+
+# . ${funcPath}/ps_func_RMSE_SSH_persistence
+
+# . ${funcPath}/ps_func_ACC_SSH_persistence 
+
+
+exit
+# ####################################################################
+# for 3D bias pattern
+# ---------------------
+var="T"; Lev=26; # 992.5 hPa
+# . ${ScriptHome}/ps_func_Bias_3D_atm
+
+ . ${ScriptHome}/ps_func_ACC_3D_atm
+# . ${ScriptHome}/ps_func_ACC_3D_atm_persistence
+
+
+

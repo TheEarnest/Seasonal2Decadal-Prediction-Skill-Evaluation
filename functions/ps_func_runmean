@@ -1,0 +1,58 @@
+#! /bin/bash
+###############################################################################
+# head ---
+set -ex
+JobStartTime=`date`
+ANsuffix=`echo ${ensDir} | awk -F "/" '{print $NF}'`
+AnalysisN="Run_Mean_"${PredictionBase}_${ANsuffix}
+echo "Start checking "${AnalysisN}" ... "
+DestDir=${outputDir}/${AnalysisN}
+if [ ! -d ${DestDir} ]; then
+  mkdir -p ${DestDir}
+fi
+tempPrefix=temp_RM
+templs=${tempPrefix}_ls
+###########################################################################
+#
+RM_length=`echo ${PredictionBase} | sed 's/.$//'`
+RM_base=`echo ${PredictionBase} | tail -c2`
+RunLength=9
+if [ "${RM_base}" == "m" ]; then
+  (( dRM = ( RM_length - 1 ) / 2 ))
+  (( RMStart = 1 + dRM ))
+  (( RMTotalLength = RunLength - dRM )) 
+
+
+  for PredYear in ${DPYear}; do
+    year=`echo ${PredYear} | awk -F "_pY" '{print $2}' `
+    mkdir -p ${DestDir}/${year}
+    cd ${ensDir}/${year}
+    ls --color=no *-??.nc | sort >  ${templs}
+    echo ${RMStart} ${RMTotalLength}
+    for irm in `seq ${RMStart} ${RMTotalLength} `; do
+      (( sRM = irm - dRM ))
+      (( eRM = irm + dRM ))
+      RM_file=`cat ${templs} | sed -n "${irm}p"  `
+      if [ ! -f ${DestDir}/${year}/${RM_file} ]; then
+        RM_Str=' '
+        for jrm in `seq ${sRM} ${eRM}`; do
+          file=`cat ${templs} | sed -n "${jrm}p"  `
+          RM_Str=${RM_Str}" "${ensDir}/${year}/${file}
+        done
+        RM_file=`cat ${templs} | sed -n "${irm}p"  `
+        cdo -O ensmean ${RM_Str} ${DestDir}/${year}/${RM_file}
+      fi
+    done
+    sleep 0.1 
+    rm -f ${templs}
+  done
+elif [ "${RM_base}" == "y" ]; then
+  echo "not finished yet ....  "
+  exit 1
+fi
+###########################################################################
+# foot --- 
+echo ${JobStartTime}
+echo `date`
+echo ${LinnBreaker}
+
